@@ -1,0 +1,20 @@
+[project]
+name = "face-attendance-spike"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "opencv-python>=4.8,<5",
+  "onnxruntime",
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "scikit-learn",
+]
+
+[dependency-groups]
+# Dev-only: one-time MiniFASNet .pth -> ONNX conversion.
+convert = ["torch", "onnx"]
+dev = ["pytest"]
+
+[tool.uv]
+package = false

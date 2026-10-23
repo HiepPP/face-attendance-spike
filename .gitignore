@@ -1,6 +1,6 @@
 upstream/
 data/
-artifacts/embeddings/
+artifacts/
 models/*
 !models/models.lock.json
 .venv/

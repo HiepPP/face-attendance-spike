@@ -22,7 +22,9 @@ Source URLs and upstream commits are in `models/models.lock.json`.
 
 - YuNet: Copyright (c) 2020 Shiqi Yu. From opencv/opencv_zoo. Not modified.
 - SFace: contributed to opencv_zoo by Yaoyao Zhong. ONNX conversion by Chengrui Wang. Not modified.
-- MiniFASNetV2 and MiniFASNetV1SE: Copyright 2020 Minivision. Planned modification: one-time conversion from PyTorch `.pth` to ONNX. The conversion script and output sha256 will be added here in T1.
+- MiniFASNetV2 and MiniFASNetV1SE: Copyright 2020 Minivision. Modified: converted from PyTorch `.pth` to ONNX by `tools/convert_minifasnet.py` (torch 2.14.1, opset 17). A softmax layer was appended to the graph. Weights are unchanged.
+  - `2.7_80x80_MiniFASNetV2.onnx` sha256 `4af4dd2dac418f48ca492c710b810c864c763e2dbcb0bc03054b4bed26d8be1d`
+  - `4_0_0_80x80_MiniFASNetV1SE.onnx` sha256 `1d731e8276a33fd7e3b41664ffcc74e85e9ef901140d13e0badb04feae62f9ca`
 - dlib 5-point landmarks and dlib ResNet v1: by Davis King, dedicated to the public domain (CC0). Shipped as `.bz2` and decompressed locally. The ResNet README states the training data includes VGG Face and FaceScrub images. Reviewers should note this.
 
 ## Runtime libraries (versions pinned in T1)

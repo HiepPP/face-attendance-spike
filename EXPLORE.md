@@ -56,3 +56,8 @@ Date: 2026-10-23. Sources are shallow clones in `upstream/` (gitignored, code on
 
 - dlib ResNet weights are CC0. The README says the training data includes VGG Face and FaceScrub. Mention this in `THIRD_PARTY_NOTICES.md` for reviewer awareness.
 - Silent-Face repo is Apache-2.0. It also ships a RetinaFace Caffe model. The spike does not need it.
+
+## Deviations so far
+
+- Face count rule: only faces at least 80 px wide count toward "exactly one face". Smaller faces, such as people far behind the user, are ignored. The handoff says to reject frames with more than 1 face. A literal rule rejected a real upload with a 9 px background person.
+- Uploads are scaled so the short side is 480 px before detection, the same as the webcam frames.

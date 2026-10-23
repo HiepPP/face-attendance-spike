@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Face Attendance Spike</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; color: #222; }
+  .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .cam { position: relative; width: 360px; height: 480px; background: #000; }
+  .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .panel { min-width: 320px; max-width: 480px; flex: 1; }
+  fieldset { margin: 0 0 12px; border: 1px solid #ccc; border-radius: 6px; }
+  label { display: inline-block; margin: 4px 8px 4px 0; }
+  input[type=number] { width: 70px; }
+  input[type=text] { width: 140px; }
+  button { padding: 5px 12px; margin: 2px 0; }
+  .small { font-size: 12px; color: #555; }
+  #status { font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; max-width: 360px; }
+  .result { font-size: 18px; font-weight: 600; margin: 8px 0; min-height: 24px; }
+  .pass { color: #0a7d22; } .fail { color: #c0161b; }
+  #preview { max-width: 100%; max-height: 320px; display: none; border: 1px solid #ddd; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border-bottom: 1px solid #eee; padding: 3px 6px; text-align: left; }
+  #upMsg div { font-size: 12px; }
+</style>
+</head>
+<body>
+<h3>Face Attendance Spike - Stack 1 (YuNet + MiniFASNet + SFace)</h3>
+<div class="wrap">
+  <div>
+    <div class="cam"><canvas id="frame" width="480" height="640"></canvas><canvas id="overlay" width="480" height="640"></canvas></div>
+    <div id="status">Đang mở camera...</div>
+  </div>
+
+  <div class="panel">
+    <fieldset>
+      <legend>Nhân viên</legend>
+      <label>Mã <input id="empId" type="text" placeholder="vd: NV001"></label>
+      <label>Tên <input id="empName" type="text" placeholder="vd: Nguyễn Văn A"></label>
+      <div class="small">Mã chỉ gồm A-Z, a-z, 0-9, _ và -. Mã dùng làm tên thư mục ảnh.</div>
+    </fieldset>
+    <fieldset>
+      <legend>Enroll bằng webcam</legend>
+      <button id="enrollBtn">Chụp 5 frame</button>
+      <span class="small">Chỉ lưu embedding, không lưu ảnh.</span>
+      <div id="enrollMsg"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Enroll bằng upload ảnh (lưu vào ổ đĩa)</legend>
+      <input id="upFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+      <label>Điều kiện <select id="upCond"></select></label>
+      <button id="upBtn">Upload &amp; enroll</button>
+      <div class="small">Thư mục: <span id="dataDir"></span>. Template dùng ảnh "normal" (nếu có).</div>
+      <div id="upMsg"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Check-in</legend>
+      <label><input type="radio" name="mode" value="auto" checked> Auto (1:N)</label>
+      <label><input type="radio" name="mode" value="pick"> Chọn tên (1:1)</label>
+      <select id="empSelect"></select>
+      <div><button id="checkinBtn">Check-in bằng webcam</button></div>
+      <div id="result" class="result"></div>
+    </fieldset>
+    <fieldset>
+      <legend>Nhận diện từ ảnh upload (không lưu ảnh)</legend>
+      <input id="recFile" type="file" accept="image/jpeg,image/png,image/webp">
+      <label><input id="recLive" type="checkbox" checked> Kiểm tra liveness</label>
+      <button id="recBtn">Nhận diện</button>
+      <div class="small">Dùng mode Auto/Chọn tên ở phần Check-in.</div>
+      <div id="recResult" class="result"></div>
+      <div id="recTop" class="small"></div>
+      <canvas id="preview"></canvas>
+    </fieldset>
+    <fieldset>
+      <legend>Ngưỡng (chưa tune)</legend>
+      <label>Liveness <input id="thLive" type="number" step="0.05"></label>
+      <label>1:1 cosine <input id="thVerify" type="number" step="0.01"></label>
+      <label>1:N T_strict <input id="thStrict" type="number" step="0.01"></label>
+      <label>1:N margin <input id="thMargin" type="number" step="0.01"></label>
+    </fieldset>
+  </div>
+
+  <div class="panel">
+    <fieldset>
+      <legend>Danh sách nhân viên</legend>
+      <table>
+        <thead><tr><th>Mã</th><th>Tên</th><th>Ảnh</th><th></th></tr></thead>
+        <tbody id="empList"></tbody>
+      </table>
+    </fieldset>
+    <fieldset>
+      <legend>Log (50 sự kiện gần nhất)</legend>
+      <table>
+        <thead><tr><th>Giờ</th><th>Mode</th><th>Nhân viên</th><th>KQ</th><th>Sim</th><th>Live</th><th>Lý do</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+    </fieldset>
+  </div>
+</div>
+
+<script>
+const W = 480, H = 640, CHECKIN_TIMEOUT_MS = 2000;
+const video = document.createElement("video");
+const frame = document.getElementById("frame"), fctx = frame.getContext("2d");
+const overlay = document.getElementById("overlay"), octx = overlay.getContext("2d");
+const $ = id => document.getElementById(id);
+let busy = false, names = {};
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.status);
+  return data;
+}
+
+// Center-crop the camera to 3:4 portrait and mirror it. The server sees the same pixels as the screen.
+function drawFrame() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (vw && vh) {
+    let sw = vh * 3 / 4, sh = vh;
+    if (sw > vw) { sw = vw; sh = vw * 4 / 3; }
+    fctx.save(); fctx.translate(W, 0); fctx.scale(-1, 1);
+    fctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, W, H);
+    fctx.restore();
+  }
+  requestAnimationFrame(drawFrame);
+}
+const snap = () => frame.toDataURL("image/jpeg", 0.92);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const num = id => parseFloat($(id).value);
+const fmt = v => v === null || v === undefined ? "-" : Number(v).toFixed(3);
+const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const who = id => names[id] ? `${names[id]} (${id})` : id;
+const mode = () => document.querySelector("input[name=mode]:checked").value;
+const thresholds = () => ({ verify: num("thVerify"), t_strict: num("thStrict"), margin: num("thMargin") });
+const readFile = f => new Promise((ok, err) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = err; r.readAsDataURL(f); });
+
+function drawBox(ctx, r, scale = 1) {
+  if (!r.bbox) return;
+  const [x, y, w, h] = r.bbox.map(v => v * scale);
+  const m = r.match, known = m && m.employee_id;
+  // Green: recognized. Orange: real face, not recognized. Red: rejected by the pipeline.
+  ctx.lineWidth = 3; ctx.strokeStyle = !r.ok ? "#e22" : (m && !known ? "#f90" : "#1c1");
+  ctx.strokeRect(x, y, w, h);
+  const lines = [];
+  if (known) lines.push(`${who(m.employee_id)}  ${m.similarity.toFixed(2)}`);
+  else if (m) lines.push(`${m.reason === "ambiguous" ? "Không chắc" : "Không rõ"}  ${m.similarity.toFixed(2)}`);
+  lines.push(`live ${fmt(r.liveness)} ${r.reason || "ok"}`);
+  const lh = 22, top = Math.max(0, y - lh * lines.length);
+  ctx.font = "bold 16px system-ui";
+  const tw = Math.max(...lines.map(t => ctx.measureText(t).width)) + 10;
+  ctx.fillStyle = "rgba(0,0,0,.65)"; ctx.fillRect(x, top, Math.max(tw, w), lh * lines.length);
+  lines.forEach((t, i) => {
+    ctx.fillStyle = i === 0 && m ? ctx.strokeStyle : "#fff";
+    ctx.fillText(t, x + 5, top + lh * (i + 1) - 6);
+  });
+}
+function showStatus(r) {
+  const t = Object.entries(r.timings || {}).map(([k, v]) => `${k}=${v.toFixed(0)}ms`).join(" ");
+  $("status").textContent = `reason=${r.reason || "ok"} det=${fmt(r.det_score)} live=${fmt(r.liveness)} ${t}`;
+}
+function showEvent(el, ev, extra = "") {
+  el.className = "result " + (ev.result === "PASS" ? "pass" : "fail");
+  el.textContent = `${ev.result === "PASS" ? "✅" : "❌"} ${who(ev.employee_id)} sim=${fmt(ev.similarity)} live=${fmt(ev.liveness_score)} ${ev.reject_reason || ""} ${extra}`;
+}
+function employee() {
+  const id = $("empId").value.trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) { alert("Nhập mã nhân viên hợp lệ (A-Z, a-z, 0-9, _ và -)."); return null; }
+  return { employee_id: id, name: $("empName").value.trim() };
+}
+
+async function liveLoop() {
+  while (true) {
+    if (!busy && video.videoWidth) {
+      try {
+        const r = await api("/api/analyze", { frame: snap(), liveness_threshold: num("thLive"), thresholds: thresholds() });
+        octx.clearRect(0, 0, W, H); drawBox(octx, r); showStatus(r);
+      } catch (e) { $("status").textContent = "Lỗi server: " + e.message; }
+    }
+    await sleep(200);
+  }
+}
+
+$("enrollBtn").onclick = async () => {
+  const emp = employee(); if (!emp) return;
+  if (!video.videoWidth) { $("enrollMsg").textContent = "Chưa có camera."; return; }
+  busy = true; const frames = [];
+  try {
+    for (let i = 0; i < 5; i++) { $("enrollMsg").textContent = `Đang chụp ${i + 1}/5... giữ yên mặt`; frames.push(snap()); await sleep(250); }
+    $("enrollMsg").textContent = "Đang xử lý...";
+    const r = await api("/api/enroll", { ...emp, frames, liveness_threshold: num("thLive") });
+    $("enrollMsg").textContent = r.ok ? `Đã enroll ${who(r.employee_id)} (${r.accepted}/5 frame hợp lệ).` : `Lỗi: ${r.reason} (${r.accepted ?? 0}/5 hợp lệ, cần >= 3)`;
+  } catch (e) { $("enrollMsg").textContent = "Lỗi: " + e.message; }
+  busy = false; refresh();
+};
+
+$("upBtn").onclick = async () => {
+  const emp = employee(); if (!emp) return;
+  const files = [...$("upFiles").files];
+  if (!files.length) { $("upMsg").textContent = "Chọn ít nhất 1 ảnh."; return; }
+  $("upMsg").innerHTML = "";
+  for (const f of files) {
+    const line = document.createElement("div"); line.textContent = `${f.name}: đang xử lý...`; $("upMsg").append(line);
+    try {
+      const r = await api("/api/upload", { ...emp, condition: $("upCond").value, file: await readFile(f) });
+      line.className = r.ok ? "pass" : "fail";
+      line.textContent = r.ok ? `${f.name}: đã lưu ${r.saved} (tổng ${r.photos} ảnh)` : `${f.name}: bỏ qua - ${r.reason}`;
+    } catch (e) { line.className = "fail"; line.textContent = `${f.name}: lỗi - ${e.message}`; }
+  }
+  $("upFiles").value = ""; refresh();
+};
+
+$("checkinBtn").onclick = async () => {
+  const m = mode(), employee_id = $("empSelect").value;
+  if (m === "pick" && !employee_id) { $("result").textContent = "Chưa có nhân viên nào."; return; }
+  if (!video.videoWidth) { $("result").textContent = "Chưa có camera."; return; }
+  busy = true; $("result").className = "result"; $("result").textContent = "Đang nhận diện...";
+  const t0 = performance.now(), deadline = t0 + CHECKIN_TIMEOUT_MS;
+  try {
+    let r;
+    while (true) {
+      const final = performance.now() >= deadline;
+      r = await api("/api/checkin", { frame: snap(), mode: m, employee_id, final, thresholds: thresholds(), liveness_threshold: num("thLive") });
+      octx.clearRect(0, 0, W, H); drawBox(octx, r); showStatus(r);
+      if (r.done) break;
+    }
+    if (r.event) showEvent($("result"), r.event, `(${(performance.now() - t0).toFixed(0)} ms)`);
+    else { $("result").className = "result fail"; $("result").textContent = `❌ ${r.reason}`; }
+  } catch (e) { $("result").textContent = "Lỗi: " + e.message; }
+  busy = false; refresh();
+};
+
+$("recBtn").onclick = async () => {
+  const f = $("recFile").files[0];
+  if (!f) { $("recResult").textContent = "Chọn 1 ảnh."; return; }
+  const m = mode(), employee_id = $("empSelect").value;
+  if (m === "pick" && !employee_id) { $("recResult").textContent = "Chưa có nhân viên nào."; return; }
+  $("recResult").className = "result"; $("recResult").textContent = "Đang nhận diện..."; $("recTop").textContent = "";
+  try {
+    const dataUrl = await readFile(f);
+    const r = await api("/api/recognize", { file: dataUrl, mode: m, employee_id, thresholds: thresholds(),
+      check_liveness: $("recLive").checked, liveness_threshold: num("thLive") });
+    if (!r.event) { $("recResult").className = "result fail"; $("recResult").textContent = `❌ ${r.reason}`; return; }
+    showEvent($("recResult"), r.event);
+    $("recTop").textContent = r.top.length ? "Top: " + r.top.map(([id, s]) => `${who(id)} ${s.toFixed(3)}`).join(" | ") : "";
+    const img = new Image();
+    img.onload = () => {
+      // The server works on a downscaled copy; scale its box back to this preview.
+      const c = $("preview"), s = Math.min(1, 480 / img.width);
+      c.width = img.width * s; c.height = img.height * s; c.style.display = "block";
+      const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, c.width, c.height);
+      drawBox(ctx, r, c.width / r.size[0]);
+    };
+    img.src = dataUrl;
+  } catch (e) { $("recResult").className = "result fail"; $("recResult").textContent = "Lỗi: " + e.message; }
+  refresh();
+};
+
+$("empList").onclick = async ev => {
+  const { del, rename } = ev.target.dataset;
+  if (del !== undefined && confirm(`Xoá ${who(del)}? Ảnh sẽ được chuyển vào thư mục _deleted.`)) {
+    await api("/api/delete", { employee_id: del });
+  } else if (rename !== undefined) {
+    const name = prompt(`Tên mới cho ${rename}:`, names[rename] || "");
+    if (name === null) return;
+    await api("/api/rename", { employee_id: rename, name });
+  } else return;
+  refresh();
+};
+
+async function refresh(first) {
+  const s = await api("/api/state");
+  names = Object.fromEntries(s.employees.map(e => [e.id, e.name]));
+  if (first) {
+    $("thLive").value = s.defaults.liveness; $("thVerify").value = s.defaults.verify;
+    $("thStrict").value = s.defaults.t_strict; $("thMargin").value = s.defaults.margin;
+    $("upCond").innerHTML = s.conditions.map(c => `<option>${c}</option>`).join("");
+    $("dataDir").textContent = s.data_dir;
+  }
+  const cur = $("empSelect").value, enrolled = s.employees.filter(e => e.enrolled);
+  $("empSelect").innerHTML = enrolled.map(e => `<option value="${esc(e.id)}"${e.id === cur ? " selected" : ""}>${esc(who(e.id))}</option>`).join("");
+  $("empList").innerHTML = s.employees.length ? s.employees.map(e => `<tr>
+      <td>${esc(e.id)}${e.enrolled ? "" : ' <span class="fail">(chưa có template)</span>'}</td>
+      <td>${esc(e.name || "-")}</td>
+      <td title="${esc(e.rejected.length ? "Ảnh không dùng được: " + e.rejected.join(", ") : "")}">${e.photos || "webcam"}${e.rejected.length ? ` (${e.rejected.length} lỗi)` : ""}</td>
+      <td><button data-rename="${esc(e.id)}">Đổi tên</button> <button data-del="${esc(e.id)}">Xoá</button></td></tr>`).join("")
+    : '<tr><td colspan="4">(trống)</td></tr>';
+  $("log").innerHTML = s.log.map(e => `<tr><td>${e.timestamp.slice(11)}</td><td>${esc(e.mode)}</td><td>${esc(who(e.employee_id))}</td><td class="${e.result === "PASS" ? "pass" : "fail"}">${e.result}</td><td>${fmt(e.similarity)}</td><td>${fmt(e.liveness_score)}</td><td>${esc(e.reject_reason || "")}</td></tr>`).join("");
+}
+
+(async () => {
+  await refresh(true);
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+    video.muted = true; video.playsInline = true; await video.play();
+  } catch (e) { $("status").textContent = "Không mở được camera (vẫn dùng được upload ảnh): " + e.message; }
+  drawFrame(); liveLoop();
+})();
+</script>
+</body>
+</html>

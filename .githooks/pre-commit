@@ -1,0 +1,10 @@
+#!/bin/sh
+# Blocks biometric data and model weights from git, even when added with `git add -f`.
+bad=$(git diff --cached --name-only --diff-filter=ACMR | grep -E \
+  -e '^(data|artifacts/embeddings)/.*\.(jpg|jpeg|png|npy)$' \
+  -e '^models/' | grep -vx 'models/models.lock.json')
+if [ -n "$bad" ]; then
+  echo "pre-commit: refusing to commit biometric data or model weights:" >&2
+  echo "$bad" >&2
+  exit 1
+fi
