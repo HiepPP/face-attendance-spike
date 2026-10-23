@@ -1,0 +1,73 @@
+{
+  "generated": "2026-10-23",
+  "upstream_commits": {
+    "opencv/opencv_zoo": "48b10fa505aeb51fbd127fc60a5c660040e823b7",
+    "minivision-ai/Silent-Face-Anti-Spoofing": "b6d5f04ad78778917853b25c778acef6d5626d15",
+    "davisking/dlib-models": "fd81b6308a6a73d4ce08859eb2f4b628a21e27a2"
+  },
+  "models": [
+    {
+      "file": "face_detection_yunet_2023mar.onnx",
+      "name": "YuNet 2023mar",
+      "role": "Stack 1 detect (OpenCV 4.x)",
+      "license": "MIT",
+      "url": "https://github.com/opencv/opencv_zoo/blob/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "bytes": 232589,
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+    },
+    {
+      "file": "face_detection_yunet_2026may.onnx",
+      "name": "YuNet 2026may (dynamic H/W)",
+      "role": "Stack 1 detect (ONNX Runtime / Android candidate)",
+      "license": "MIT",
+      "url": "https://github.com/opencv/opencv_zoo/blob/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_detection_yunet/face_detection_yunet_2026may.onnx",
+      "bytes": 229738,
+      "sha256": "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+    },
+    {
+      "file": "face_recognition_sface_2021dec.onnx",
+      "name": "SFace 2021dec",
+      "role": "Stack 1 embed",
+      "license": "Apache-2.0",
+      "url": "https://github.com/opencv/opencv_zoo/blob/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+      "bytes": 38696353,
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+    },
+    {
+      "file": "2.7_80x80_MiniFASNetV2.pth",
+      "name": "MiniFASNetV2 (scale 2.7)",
+      "role": "Liveness, both stacks",
+      "license": "Apache-2.0",
+      "url": "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/blob/b6d5f04ad78778917853b25c778acef6d5626d15/resources/anti_spoof_models/2.7_80x80_MiniFASNetV2.pth",
+      "bytes": 1849453,
+      "sha256": "a5eb02e1843f19b5386b953cc4c9f011c3f985d0ee2bb9819eea9a142099bec0"
+    },
+    {
+      "file": "4_0_0_80x80_MiniFASNetV1SE.pth",
+      "name": "MiniFASNetV1SE (scale 4.0)",
+      "role": "Liveness, both stacks",
+      "license": "Apache-2.0",
+      "url": "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/blob/b6d5f04ad78778917853b25c778acef6d5626d15/resources/anti_spoof_models/4_0_0_80x80_MiniFASNetV1SE.pth",
+      "bytes": 1856130,
+      "sha256": "84ee1d37d96894d5e82de5a57df044ef80a58be2b218b5ed7cdfd875ec2f5990"
+    },
+    {
+      "file": "shape_predictor_5_face_landmarks.dat.bz2",
+      "name": "dlib 5-point landmarks",
+      "role": "Stack 2 align",
+      "license": "CC0-1.0",
+      "url": "https://github.com/davisking/dlib-models/blob/fd81b6308a6a73d4ce08859eb2f4b628a21e27a2/shape_predictor_5_face_landmarks.dat.bz2",
+      "bytes": 5706710,
+      "sha256": "6e787bbebf5c9efdb793f6cd1f023230c4413306605f24f299f12869f95aa472"
+    },
+    {
+      "file": "dlib_face_recognition_resnet_model_v1.dat.bz2",
+      "name": "dlib ResNet face recognition v1",
+      "role": "Stack 2 embed",
+      "license": "CC0-1.0",
+      "url": "https://github.com/davisking/dlib-models/blob/fd81b6308a6a73d4ce08859eb2f4b628a21e27a2/dlib_face_recognition_resnet_model_v1.dat.bz2",
+      "bytes": 21428389,
+      "sha256": "abb1f61041e434465855ce81c2bd546e830d28bcbed8d27ffbe5bb408b11553a"
+    }
+  ]
+}

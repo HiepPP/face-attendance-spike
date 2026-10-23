@@ -1,0 +1,7 @@
+upstream/
+data/
+artifacts/embeddings/
+models/*
+!models/models.lock.json
+.venv/
+__pycache__/
