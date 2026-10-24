@@ -452,7 +452,8 @@ async function autoCheckin(id) {
       if (r.done) break;
     }
     const ev = r.event, pass = ev && ev.result === "PASS";
-    nextTry.set(id, Date.now() + (pass ? COOLDOWN_MS : RETRY_MS));
+    // The server cooldown covers other kiosks; retry_after says when this person may check in again.
+    nextTry.set(id, Date.now() + (pass ? COOLDOWN_MS : r.retry_after ? r.retry_after * 1000 : RETRY_MS));
     if (pass && ev.employee_id !== id) nextTry.set(ev.employee_id, Date.now() + COOLDOWN_MS);
     if (ev) {
       const img = new Image(); img.src = shot; await img.decode();
@@ -460,6 +461,8 @@ async function autoCheckin(id) {
       details.set(evKey(ev), { crop, timings: r.timings });
       kioskResult(ev, crop, (performance.now() - t0).toFixed(0));
       selKey = evKey(ev);
+    } else if (r.reason === "already_checked_in") {
+      kioskMessage(`${names[r.employee_id] || r.employee_id} đã check-in rồi. Thử lại sau ${Math.ceil(r.retry_after)} giây.`);
     } else kioskMessage(REASONS[r.reason] || r.reason);
   } catch (e) { kioskMessage("Lỗi: " + e.message); }
   busy = false; await refresh();

@@ -77,6 +77,23 @@ def test_rejected_photo_is_logged_without_a_name_in_1n_mode(svc, real):
     assert r["event"]["reject_reason"] == "spoof" and r["event"]["employee_id"] == "NV001"
 
 
+def test_checkin_cooldown_blocks_a_second_pass_without_logging(svc, real):
+    svc.upload({"employee_id": "NV001", "file": b64(real)})
+    frame = {"frame": b64(real), "mode": "auto", "final": True}
+    assert svc.checkin(frame)["event"]["result"] == "PASS"
+    logged = len(svc.log)
+    # A second kiosk sends the same person within the cooldown: answered, not logged.
+    r = svc.checkin(frame)
+    assert r["event"] is None and r["reason"] == "already_checked_in" and r["employee_id"] == "NV001"
+    assert 0 < r["retry_after"] <= web.CHECKIN_COOLDOWN_S
+    assert len(svc.log) == logged
+    # A rejected attempt is not a check-in, so the cooldown does not hide it.
+    spoof = svc.checkin({"frame": b64(cv2.imread(str(SAMPLES / "image_F2.jpg"))), "mode": "auto", "final": True})
+    assert spoof["event"]["reject_reason"] == "spoof"
+    svc.last_pass["NV001"] -= web.CHECKIN_COOLDOWN_S  # the cooldown has passed
+    assert svc.checkin(frame)["event"]["result"] == "PASS"
+
+
 def test_gallery_is_rebuilt_from_folder_after_restart(svc, real, tmp_path):
     svc.upload({"employee_id": "NV001", "name": "A", "file": b64(real)})
     app.GALLERY_PATH.unlink()
