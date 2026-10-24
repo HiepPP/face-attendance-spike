@@ -5,107 +5,254 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Face Attendance Spike</title>
 <style>
-  body { font: 14px system-ui, sans-serif; margin: 16px; color: #222; }
-  .wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
-  .cam { position: relative; width: 360px; height: 480px; background: #000; }
+  /* Gallery look (design 3b). System fonts only: the demo runs offline. */
+  :root { --paper: #F6F3EC; --card: #FBF9F4; --ink: #191714; --mute: #77706A; --line: #E2DDD3; --dark: #1E1C19;
+    --ok: oklch(0.45 0.07 160); --bad: oklch(0.50 0.11 30); --warn: oklch(0.55 0.09 75); --idle: #C9C2B6;
+    --okbg: oklch(0.95 0.025 160); --badbg: oklch(0.95 0.03 30); --warnbg: oklch(0.95 0.03 75);
+    --serif: ui-serif, "New York", Charter, "Times New Roman", serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+  /* New York defaults to old-style figures; IDs like NV001 read better with lining figures. */
+  * { box-sizing: border-box; font-variant-numeric: lining-nums; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--ink); } a:hover { color: var(--ok); }
+  [hidden] { display: none !important; }
+  .mono { font-family: var(--mono); font-variant-numeric: lining-nums tabular-nums; }
+  .serif { font-family: var(--serif); }
+  .mute { color: var(--mute); }
+  .small { font-size: 12px; color: var(--mute); }
+  .pass { color: var(--ok); } .fail { color: var(--bad); }
+
+  .nav { height: 70px; display: flex; align-items: center; gap: 28px; padding: 0 48px; border-bottom: 1px solid var(--line); }
+  .logo { font: italic 22px var(--serif); margin-right: 12px; }
+  .tab { font: inherit; font-size: 13px; color: var(--mute); background: none; border: 0; padding: 4px 0; cursor: pointer; }
+  .tab.on { color: var(--ink); font-weight: 600; box-shadow: inset 0 -1px 0 var(--ink); }
+  .pill { display: inline-flex; align-items: center; font: 500 11px var(--mono); padding: 2px 8px; border-radius: 2px; background: #EDE9E1; color: var(--mute); white-space: nowrap; }
+  .pill.ok { background: var(--okbg); color: var(--ok); }
+  .pill.bad { background: var(--badbg); color: var(--bad); }
+  .pill.warn { background: var(--warnbg); color: var(--warn); }
+
+  button { font: inherit; font-size: 13px; font-weight: 500; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 2px; padding: 8px 14px; cursor: pointer; }
+  button.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  button.link { border: 0; border-bottom: 1px solid currentColor; border-radius: 0; background: none; padding: 1px 0; color: var(--mute); font-size: 13px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=text], input[type=number], select { font: inherit; border: 1px solid var(--line); background: var(--card); border-radius: 2px; padding: 8px 10px; min-width: 0; }
+  input[type=number] { font-family: var(--mono); width: 80px; text-align: right; }
+  /* min-width: 0 lets a label shrink below its input's default width, so the fields stay inside the card. */
+  label.f { display: flex; flex-direction: column; gap: 4px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--mute); min-width: 0; }
+  label.f input, label.f select { width: 100%; letter-spacing: 0; text-transform: none; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .jb { justify-content: space-between; }
+
+  /* Camera: canvases are 3:4 portrait, mirrored. One camera element moves between the kiosk and the enroll card. */
+  .cam { position: relative; width: 100%; aspect-ratio: 3 / 4; background: var(--dark); overflow: hidden; }
   .cam canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .panel { min-width: 320px; max-width: 480px; flex: 1; }
-  fieldset { margin: 0 0 12px; border: 1px solid #ccc; border-radius: 6px; }
-  label { display: inline-block; margin: 4px 8px 4px 0; }
-  input[type=number] { width: 70px; }
-  input[type=text] { width: 140px; }
-  button { padding: 5px 12px; margin: 2px 0; }
-  .small { font-size: 12px; color: #555; }
-  #status { font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; max-width: 360px; }
-  .result { font-size: 18px; font-weight: 600; margin: 8px 0; min-height: 24px; }
-  .pass { color: #0a7d22; } .fail { color: #c0161b; }
-  #preview { max-width: 100%; max-height: 320px; display: none; border: 1px solid #ddd; }
-  table { border-collapse: collapse; width: 100%; font-size: 12px; }
-  th, td { border-bottom: 1px solid #eee; padding: 3px 6px; text-align: left; }
+  .cam #overlay { z-index: 2; }
+
+  /* Kiosk */
+  /* Kiosk: the camera fills the view; a centered ring shows where to place the face. */
+  /* The kiosk fills the space under the fixed-height nav; --kh sizes the ring and camera to that height. */
+  /* --fh: height of the 3:4 frame the server sees; it fills the kiosk height. */
+  .kiosk { --kh: calc(100vh - 70px); --fh: var(--kh); height: var(--kh); position: relative; overflow: hidden; background: var(--dark); }
+  body.fs .kiosk { --kh: 100vh; }
+  #camSlotKiosk { position: absolute; inset: 0; }
+  /* The raw camera fills the screen behind the 3:4 frame. The frame is its center crop, so the two line up;
+     the soft, dim background shows what the server does not see. */
+  .bgvideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); filter: blur(10px) brightness(.75); }
+  #camSlotKiosk .cam { position: absolute; left: 50%; top: 50%; height: var(--fh); width: calc(var(--fh) * .75); transform: translate(-50%, -50%); background: none; }
+  .ring { position: absolute; z-index: 3; left: 50%; top: 50%; width: min(calc(var(--fh) * .47), calc(var(--kh) * .72), 86vw); aspect-ratio: 1; transform: translate(-50%, -50%);
+    border-radius: 50%; border: 2px solid rgba(246, 243, 236, .75); box-shadow: 0 0 0 200vmax rgba(25, 23, 20, .5);
+    pointer-events: none; transition: border-color .25s, border-width .25s; }
+  .ring.ok, .ring.warn, .ring.bad { border-width: 4px; }
+  .ring.ok { border-color: oklch(0.72 0.09 160); } .ring.warn { border-color: oklch(0.80 0.10 75); } .ring.bad { border-color: oklch(0.70 0.12 30); }
+  .gtop { position: absolute; z-index: 4; left: 40px; right: 40px; top: 24px; display: flex; justify-content: space-between; align-items: baseline; color: var(--paper); }
+  .gtop .mono { color: var(--paper); }
+  .gtop button.link { color: var(--paper); }
+  .gword { font: italic 22px var(--serif); }
+  body:not(.fs) .gword { visibility: hidden; } /* the nav already shows the wordmark */
+  .hint { position: absolute; z-index: 4; left: 0; right: 0; top: calc(50% - min(calc(var(--fh) * .235), calc(var(--kh) * .36), 43vw) - 48px); text-align: center; font: 22px var(--serif); color: var(--paper); }
+  .k3card { position: absolute; z-index: 4; left: 50%; bottom: 32px; transform: translateX(-50%); min-width: min(420px, 90vw); max-width: 90vw;
+    padding: 20px 36px; background: rgba(246, 243, 236, .94); color: var(--ink); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; }
+  .k3card:empty { display: none; }
+  .k3card img, .k3card .k3time { display: none; }
+  .k3card > div { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .k3name { font: 44px/1.05 var(--serif); letter-spacing: -.015em; text-wrap: balance; }
+  .k3sub { font-size: 15px; font-weight: 500; }
+  .k3card > .k3sub:only-child { font: 22px/1.2 var(--serif); font-weight: 400; color: var(--ink); }
+  .kctl { position: absolute; z-index: 4; left: 40px; right: 40px; bottom: 8px; display: flex; justify-content: flex-end; }
+  #status { font: 11px var(--mono); color: rgba(246, 243, 236, .6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  body.fs .nav { display: none; }
+
+  /* Admin */
+  .grid { display: grid; grid-template-columns: 360px minmax(0, 1fr) 320px; gap: 48px; padding: 36px 48px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 40px; min-width: 0; }
+  .card { border-top: 1px solid var(--ink); padding-top: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .card h2 { margin: 0; font: 400 24px/1.15 var(--serif); display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .seg { display: flex; gap: 20px; border-bottom: 1px solid var(--line); }
+  .seg button { border: 0; border-radius: 0; background: none; color: var(--mute); padding: 6px 0; }
+  .seg button.on { color: var(--ink); box-shadow: inset 0 -1px 0 var(--ink); }
+  #camSlotAdmin { width: 220px; align-self: center; border-radius: 50%; aspect-ratio: 1; overflow: hidden; position: relative; }
+  #camSlotAdmin .cam { position: absolute; top: 50%; transform: translateY(-50%); }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 24px; height: 2px; background: var(--line); }
+  .dots i.on { background: var(--ok); }
+  .thr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+  .thr input[type=range] { grid-column: 1 / 3; width: 100%; margin: 0; accent-color: var(--ink); }
+  .chips { display: flex; gap: 14px; }
+  .chips button { font: 500 11px var(--mono); padding: 2px 0; border: 0; border-radius: 0; background: none; color: var(--mute); }
+  .chips button.on { color: var(--ink); box-shadow: inset 0 -1px 0 var(--ink); }
+  .simcell { display: flex; align-items: center; gap: 10px; min-width: 120px; }
+  .simcell .bar { flex: 1; }
+  .empty { color: var(--mute); font: 17px var(--serif); text-align: center; padding: 28px 6px; }
+  .result { font: 20px/1.3 var(--serif); min-height: 20px; }
+  #preview { max-width: 100%; max-height: 320px; display: none; }
   #upMsg div { font-size: 12px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { font-size: 11px; font-weight: 400; letter-spacing: .14em; text-transform: uppercase; color: var(--mute); text-align: left; padding: 0 6px 10px; }
+  td { border-top: 1px solid var(--line); padding: 12px 6px; text-align: left; }
+  td.num { font-family: var(--mono); font-variant-numeric: lining-nums tabular-nums; }
+  #empList td:nth-child(2), #log td:nth-child(3) { font: 16px var(--serif); }
+  #log tr { cursor: pointer; }
+  #log tr:hover { background: var(--card); }
+  #log tr.sel { background: linear-gradient(90deg, var(--card), transparent); box-shadow: inset 2px 0 0 var(--ink); }
+
+  .crop { width: 140px; aspect-ratio: 1; object-fit: cover; border-radius: 50%; background: var(--dark); }
+  .cand { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font: 16px var(--serif); }
+  .cand .mono { font-size: 13px; }
+  .bar { grid-column: 1 / 3; height: 2px; background: var(--line); position: relative; }
+  .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink); }
+  .bar u { position: absolute; top: -5px; bottom: -5px; width: 1px; background: var(--bad); }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font: 12px var(--mono); }
+  .kv span:nth-child(odd) { color: var(--mute); }
+
+  /* The font shorthand resets font-variant-numeric, so restore lining figures on serif text. */
+  .logo, .gword, .k3name, .k3card > .k3sub:only-child, .card h2, .empty, .result, .cand, #empList td:nth-child(2), #log td:nth-child(3) { font-variant-numeric: lining-nums; }
+  @media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; } .grid > .col:last-child { grid-column: 1 / -1; } }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; padding: 24px; } .kiosk { padding: 24px; } .k3name { font-size: 40px; } }
 </style>
 </head>
 <body>
-<h3>Face Attendance Spike - Stack 1 (YuNet + MiniFASNet + SFace)</h3>
-<div class="wrap">
-  <div>
-    <div class="cam"><canvas id="frame" width="480" height="640"></canvas><canvas id="overlay" width="480" height="640"></canvas></div>
-    <div id="status">Đang mở camera...</div>
-  </div>
+<header class="nav">
+  <span class="logo">Attendance</span>
+  <button class="tab on" data-view="kiosk">Kiosk</button>
+  <button class="tab" data-view="admin">Admin</button>
+  <span class="pill" style="margin-left:auto">Stack 1 · offline</span>
+</header>
 
-  <div class="panel">
-    <fieldset>
-      <legend>Nhân viên</legend>
-      <label>Mã <input id="empId" type="text" placeholder="vd: NV001"></label>
-      <label>Tên <input id="empName" type="text" placeholder="vd: Nguyễn Văn A"></label>
+<main id="kioskView" class="kiosk">
+  <div id="camSlotKiosk">
+    <div class="cam" id="cam"><canvas id="frame" width="480" height="640"></canvas><canvas id="overlay" width="480" height="640"></canvas></div>
+  </div>
+  <div id="ring" class="ring"></div>
+  <div class="gtop"><span class="gword">Attendance</span><span class="row" style="gap:20px"><span id="clock" class="mono"></span><button id="fsBtn" class="link">Toàn màn hình</button></span></div>
+  <div class="hint">Đặt khuôn mặt vào vòng tròn</div>
+  <div id="result" class="k3card"></div>
+  <div class="kctl"><span id="status">Đang mở camera...</span></div>
+</main>
+
+<main id="adminView" class="grid" hidden>
+  <div class="col">
+    <section class="card">
+      <h2>Thêm nhân viên</h2>
+      <div class="row" style="flex-wrap:nowrap">
+        <label class="f" style="flex:0 0 110px">Mã<input id="empId" type="text" placeholder="vd: NV001"></label>
+        <label class="f" style="flex:1">Tên<input id="empName" type="text" placeholder="vd: Nguyễn Văn A"></label>
+      </div>
       <div class="small">Mã chỉ gồm A-Z, a-z, 0-9, _ và -. Mã dùng làm tên thư mục ảnh.</div>
-    </fieldset>
-    <fieldset>
-      <legend>Enroll bằng webcam</legend>
-      <button id="enrollBtn">Chụp 5 frame</button>
-      <span class="small">Chỉ lưu embedding, không lưu ảnh.</span>
-      <div id="enrollMsg"></div>
-    </fieldset>
-    <fieldset>
-      <legend>Enroll bằng upload ảnh (lưu vào ổ đĩa)</legend>
-      <input id="upFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple>
-      <label>Điều kiện <select id="upCond"></select></label>
-      <button id="upBtn">Upload &amp; enroll</button>
-      <div class="small">Thư mục: <span id="dataDir"></span>. Template dùng ảnh "normal" (nếu có).</div>
-      <div id="upMsg"></div>
-    </fieldset>
-    <fieldset>
-      <legend>Check-in</legend>
-      <label><input type="radio" name="mode" value="auto" checked> Auto (1:N)</label>
-      <label><input type="radio" name="mode" value="pick"> Chọn tên (1:1)</label>
-      <select id="empSelect"></select>
-      <div><button id="checkinBtn">Check-in bằng webcam</button></div>
-      <div id="result" class="result"></div>
-    </fieldset>
-    <fieldset>
-      <legend>Nhận diện từ ảnh upload (không lưu ảnh)</legend>
+      <div class="seg"><button class="on" data-pane="paneCam">Webcam</button><button data-pane="paneUp">Upload ảnh</button></div>
+      <div id="paneCam" class="col" style="gap:12px">
+        <div id="camSlotAdmin"></div>
+        <div class="row jb"><div class="dots" id="dots"><i></i><i></i><i></i><i></i><i></i></div><button id="enrollBtn" class="primary">Chụp 5 frame</button></div>
+        <div class="small">Chỉ lưu embedding, không lưu ảnh.</div>
+        <div id="enrollMsg"></div>
+      </div>
+      <div id="paneUp" class="col" style="gap:12px" hidden>
+        <input id="upFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+        <div class="row"><label class="f">Điều kiện<select id="upCond"></select></label><button id="upBtn" class="primary" style="margin-left:auto;align-self:flex-end">Upload &amp; enroll</button></div>
+        <div class="small">Ảnh được lưu vào ổ đĩa. Thư mục: <span id="dataDir" class="mono"></span>. Template dùng ảnh "normal" (nếu có).</div>
+        <div id="upMsg"></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Ngưỡng <span class="pill warn">chưa tune</span></h2>
+      <div class="thr"><span>Liveness</span><input id="thLive" type="number" step="0.05"><input type="range" data-for="thLive" min="0" max="1" step="0.01"></div>
+      <div class="thr"><span>1:1 cosine</span><input id="thVerify" type="number" step="0.01"><input type="range" data-for="thVerify" min="0" max="1" step="0.01"></div>
+      <div class="thr"><span>1:N T_strict</span><input id="thStrict" type="number" step="0.01"><input type="range" data-for="thStrict" min="0" max="1" step="0.01"></div>
+      <div class="thr"><span>1:N margin</span><input id="thMargin" type="number" step="0.01"><input type="range" data-for="thMargin" min="0" max="0.2" step="0.005"></div>
+    </section>
+    <section class="card">
+      <h2>Nhận diện từ ảnh</h2>
       <input id="recFile" type="file" accept="image/jpeg,image/png,image/webp">
-      <label><input id="recLive" type="checkbox" checked> Kiểm tra liveness</label>
-      <button id="recBtn">Nhận diện</button>
-      <div class="small">Dùng mode Auto/Chọn tên ở phần Check-in.</div>
+      <div class="row jb"><label><input id="recLive" type="checkbox" checked> Kiểm tra liveness</label><button id="recBtn" class="primary">Nhận diện</button></div>
+      <div class="row">
+        <label><input type="radio" name="mode" value="auto" checked> Auto (1:N)</label>
+        <label><input type="radio" name="mode" value="pick"> Chọn tên (1:1)</label>
+        <select id="empSelect"></select>
+      </div>
+      <div class="small">Không lưu ảnh.</div>
       <div id="recResult" class="result"></div>
       <div id="recTop" class="small"></div>
       <canvas id="preview"></canvas>
-    </fieldset>
-    <fieldset>
-      <legend>Ngưỡng (chưa tune)</legend>
-      <label>Liveness <input id="thLive" type="number" step="0.05"></label>
-      <label>1:1 cosine <input id="thVerify" type="number" step="0.01"></label>
-      <label>1:N T_strict <input id="thStrict" type="number" step="0.01"></label>
-      <label>1:N margin <input id="thMargin" type="number" step="0.01"></label>
-    </fieldset>
+    </section>
   </div>
 
-  <div class="panel">
-    <fieldset>
-      <legend>Danh sách nhân viên</legend>
+  <div class="col">
+    <section class="card">
+      <h2>Nhân viên <span id="empCount" class="small mono"></span></h2>
       <table>
         <thead><tr><th>Mã</th><th>Tên</th><th>Ảnh</th><th></th></tr></thead>
         <tbody id="empList"></tbody>
       </table>
-    </fieldset>
-    <fieldset>
-      <legend>Log (50 sự kiện gần nhất)</legend>
+    </section>
+    <section class="card">
+      <h2>Log <span class="chips" id="logFilter"><button class="on" data-f="all">Tất cả</button><button data-f="PASS">PASS</button><button data-f="FAIL">FAIL</button></span></h2>
+      <div class="small">50 sự kiện gần nhất · vạch đỏ = ngưỡng hiện tại · bấm một dòng để xem chi tiết</div>
       <table>
         <thead><tr><th>Giờ</th><th>Mode</th><th>Nhân viên</th><th>KQ</th><th>Sim</th><th>Live</th><th>Lý do</th></tr></thead>
         <tbody id="log"></tbody>
       </table>
-    </fieldset>
+    </section>
   </div>
-</div>
+
+  <div class="col">
+    <section class="card" id="detail">
+      <h2>Chi tiết sự kiện</h2>
+      <div class="small">Bấm một dòng log để xem chi tiết.</div>
+    </section>
+  </div>
+</main>
 
 <script>
 const W = 480, H = 640, CHECKIN_TIMEOUT_MS = 2000;
 const video = document.createElement("video");
+video.className = "bgvideo";
+document.getElementById("camSlotKiosk").prepend(video);
 const frame = document.getElementById("frame"), fctx = frame.getContext("2d");
 const overlay = document.getElementById("overlay"), octx = overlay.getContext("2d");
 const $ = id => document.getElementById(id);
-let busy = false, names = {};
+let busy = false, names = {}, logRows = [], selKey = null, logFilter = "all", hideTimer, lastSeen = null;
+// Kiosk auto check-in: a person is checked in once per COOLDOWN_MS.
+// A failed attempt blocks the same person for RETRY_MS so the loop does not spam the log.
+// The block times live in localStorage, so a page reload or a second kiosk tab in this browser respects them.
+const COOLDOWN_MS = 60000, RETRY_MS = 5000, NEXT_TRY_KEY = "fa.kiosk.nextTry";
+const readNextTry = () => { try { return JSON.parse(localStorage.getItem(NEXT_TRY_KEY)) || {}; } catch { return {}; } };
+const nextTry = {
+  get: id => readNextTry()[id] || 0,
+  set(id, t) {
+    const m = readNextTry(), now = Date.now();
+    for (const k in m) if (m[k] < now) delete m[k];
+    m[id] = t;
+    localStorage.setItem(NEXT_TRY_KEY, JSON.stringify(m));
+  },
+};
+// Per-event extras (face crop, timings, top-N) for events created in this browser session.
+// They stay in memory only; the server log has no such fields.
+const details = new Map();
+const REASONS = {
+  spoof: "Cần mặt thật trước camera", unknown: "Chưa nhận ra", ambiguous: "Không chắc là ai, thử lại",
+  below_threshold: "Không khớp với tên đã chọn", no_face: "Không thấy mặt", multiple_faces: "Chỉ một người trước camera",
+  face_too_small: "Lại gần camera hơn", low_det_score: "Chưa thấy rõ mặt", too_dark: "Ảnh quá tối",
+  too_bright: "Ảnh quá sáng", blurry: "Ảnh bị mờ, giữ yên", face_out_of_frame: "Mặt nằm ngoài khung",
+};
 
 async function api(path, body) {
   const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -135,6 +282,17 @@ const who = id => names[id] ? `${names[id]} (${id})` : id;
 const mode = () => document.querySelector("input[name=mode]:checked").value;
 const thresholds = () => ({ verify: num("thVerify"), t_strict: num("thStrict"), margin: num("thMargin") });
 const readFile = f => new Promise((ok, err) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = err; r.readAsDataURL(f); });
+const evKey = ev => `${ev.timestamp}|${ev.employee_id}|${ev.mode}`;
+const modeLabel = m => (m.startsWith("pick") ? "1:1" : "1:N") + (m.endsWith("/upload") ? " ảnh" : "");
+const tone = ev => ev.result === "PASS" ? "ok" : ["unknown", "ambiguous", "below_threshold"].includes(ev.reject_reason) ? "warn" : "bad";
+
+function cropFace(src, bbox, scale = 1) {
+  if (!bbox) return null;
+  const [x, y, w, h] = bbox.map(v => v * scale), pad = 0.2 * Math.max(w, h);
+  const c = document.createElement("canvas"); c.width = c.height = 160;
+  c.getContext("2d").drawImage(src, x - pad, y - pad, w + 2 * pad, h + 2 * pad, 0, 0, 160, 160);
+  return c.toDataURL("image/jpeg", 0.85);
+}
 
 function drawBox(ctx, r, scale = 1) {
   if (!r.bbox) return;
@@ -156,6 +314,10 @@ function drawBox(ctx, r, scale = 1) {
     ctx.fillText(t, x + 5, top + lh * (i + 1) - 6);
   });
 }
+function setRing(r) {
+  const m = r.match;
+  $("ring").className = "ring " + (!r.bbox ? "" : !r.ok ? "bad" : m && !m.employee_id ? "warn" : m ? "ok" : "");
+}
 function showStatus(r) {
   const t = Object.entries(r.timings || {}).map(([k, v]) => `${k}=${v.toFixed(0)}ms`).join(" ");
   $("status").textContent = `reason=${r.reason || "ok"} det=${fmt(r.det_score)} live=${fmt(r.liveness)} ${t}`;
@@ -164,10 +326,57 @@ function showEvent(el, ev, extra = "") {
   el.className = "result " + (ev.result === "PASS" ? "pass" : "fail");
   el.textContent = `${ev.result === "PASS" ? "✅" : "❌"} ${who(ev.employee_id)} sim=${fmt(ev.similarity)} live=${fmt(ev.liveness_score)} ${ev.reject_reason || ""} ${extra}`;
 }
+function kioskResult(ev, crop, ms) {
+  const t = tone(ev), color = `var(--${t})`;
+  $("ring").className = "ring " + t;
+  const name = ev.result === "PASS" ? esc(names[ev.employee_id] || ev.employee_id) : esc(REASONS[ev.reject_reason] || ev.reject_reason || "Không check-in được");
+  const sub = ev.result === "PASS" ? "Đã check-in" : "Chưa check-in";
+  $("result").innerHTML = `${crop ? `<img src="${crop}" alt="" style="width:56px;height:56px;border-radius:12px;object-fit:cover">` : ""}
+    <div><div class="k3name">${name}</div><div class="k3sub" style="color:${color}">${sub}</div>
+    <div class="small mono">${ev.result === "PASS" ? esc(ev.employee_id) : esc(ev.reject_reason || "")} · sim ${fmt(ev.similarity)} · live ${fmt(ev.liveness_score)}${ms ? ` · ${ms} ms` : ""}</div></div>
+    <span class="k3time">${ev.timestamp.slice(11, 16)}</span>`;
+  hideResultLater();
+}
+function hideResultLater() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => { $("result").innerHTML = ""; hideTimer = null; }, 6000);
+}
+function kioskMessage(text, keep = false) {
+  $("result").innerHTML = `<div class="k3sub">${esc(text)}</div>`;
+  if (keep) { clearTimeout(hideTimer); hideTimer = null; } else hideResultLater();
+}
+const guard = fn => async function () {
+  if (this.disabled) return;
+  const label = this.textContent;
+  this.disabled = true; this.textContent = "Đang xử lý...";
+  try { await fn(); } finally { this.disabled = false; this.textContent = label; }
+};
 function employee() {
   const id = $("empId").value.trim();
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) { alert("Nhập mã nhân viên hợp lệ (A-Z, a-z, 0-9, _ và -)."); return null; }
   return { employee_id: id, name: $("empName").value.trim() };
+}
+
+function showDetail(ev) {
+  if (!ev) return;
+  selKey = evKey(ev);
+  document.querySelectorAll("#log tr").forEach(tr => tr.classList.toggle("sel", tr.dataset.key === selKey));
+  const d = details.get(selKey) || {}, pick = ev.mode.startsWith("pick");
+  const th = thresholds(), line = pick ? th.verify : th.t_strict;
+  let html = `<h2>Chi tiết sự kiện <span class="pill ${tone(ev)}">${esc(ev.reject_reason || ev.result)}</span></h2>
+    <div class="small mono">${esc(ev.timestamp.replace("T", " "))} · ${modeLabel(ev.mode)} · live ${fmt(ev.liveness_score)}</div>
+    <div>${esc(who(ev.employee_id))} · sim <span class="mono">${fmt(ev.similarity)}</span></div>`;
+  html += d.crop ? `<img class="crop" src="${d.crop}" alt="">` : "";
+  if (d.top && d.top.length) {
+    html += `<div class="small">Top ${Math.min(3, d.top.length)} ứng viên · vạch đỏ = ${pick ? "1:1 cosine" : "T_strict"} ${line} (ngưỡng hiện tại)</div>`;
+    html += d.top.slice(0, 3).map(([id, s]) => `<div class="cand"><span>${esc(who(id))}</span><span class="mono">${s.toFixed(3)}</span>
+      <span class="bar"><i style="width:${Math.max(0, Math.min(1, s)) * 100}%"></i><u style="left:${line * 100}%"></u></span></div>`).join("");
+    if (ev.reject_reason === "ambiguous" && d.top.length > 1)
+      html += `<div style="font-size:13px">Top-1 cách top-2 ${(d.top[0][1] - d.top[1][1]).toFixed(3)}, nhỏ hơn margin ${th.margin}, nên bị từ chối.</div>`;
+  }
+  if (d.timings) html += `<div class="small">Thời gian</div><div class="kv">${Object.entries(d.timings).map(([k, v]) => `<span>${esc(k)}</span><span>${v.toFixed(0)} ms</span>`).join("")}</div>`;
+  if (!d.crop && !d.timings) html += `<div class="small">Ảnh, top ứng viên và thời gian chỉ có cho sự kiện tạo trong phiên trình duyệt này.</div>`;
+  $("detail").innerHTML = html;
 }
 
 async function liveLoop() {
@@ -175,27 +384,29 @@ async function liveLoop() {
     if (!busy && video.videoWidth) {
       try {
         const r = await api("/api/analyze", { frame: snap(), liveness_threshold: num("thLive"), thresholds: thresholds() });
-        octx.clearRect(0, 0, W, H); drawBox(octx, r); showStatus(r);
+        octx.clearRect(0, 0, W, H); drawBox(octx, r); showStatus(r); setRing(r);
+        await onLive(r);
       } catch (e) { $("status").textContent = "Lỗi server: " + e.message; }
     }
     await sleep(200);
   }
 }
 
-$("enrollBtn").onclick = async () => {
+$("enrollBtn").onclick = guard(async () => {
   const emp = employee(); if (!emp) return;
   if (!video.videoWidth) { $("enrollMsg").textContent = "Chưa có camera."; return; }
-  busy = true; const frames = [];
+  busy = true; const frames = [], dots = [...$("dots").children];
+  dots.forEach(d => d.classList.remove("on"));
   try {
-    for (let i = 0; i < 5; i++) { $("enrollMsg").textContent = `Đang chụp ${i + 1}/5... giữ yên mặt`; frames.push(snap()); await sleep(250); }
+    for (let i = 0; i < 5; i++) { $("enrollMsg").textContent = `Đang chụp ${i + 1}/5... giữ yên mặt`; frames.push(snap()); dots[i].classList.add("on"); await sleep(250); }
     $("enrollMsg").textContent = "Đang xử lý...";
     const r = await api("/api/enroll", { ...emp, frames, liveness_threshold: num("thLive") });
     $("enrollMsg").textContent = r.ok ? `Đã enroll ${who(r.employee_id)} (${r.accepted}/5 frame hợp lệ).` : `Lỗi: ${r.reason} (${r.accepted ?? 0}/5 hợp lệ, cần >= 3)`;
   } catch (e) { $("enrollMsg").textContent = "Lỗi: " + e.message; }
   busy = false; refresh();
-};
+});
 
-$("upBtn").onclick = async () => {
+$("upBtn").onclick = guard(async () => {
   const emp = employee(); if (!emp) return;
   const files = [...$("upFiles").files];
   if (!files.length) { $("upMsg").textContent = "Chọn ít nhất 1 ảnh."; return; }
@@ -209,29 +420,53 @@ $("upBtn").onclick = async () => {
     } catch (e) { line.className = "fail"; line.textContent = `${f.name}: lỗi - ${e.message}`; }
   }
   $("upFiles").value = ""; refresh();
-};
+});
 
-$("checkinBtn").onclick = async () => {
-  const m = mode(), employee_id = $("empSelect").value;
-  if (m === "pick" && !employee_id) { $("result").textContent = "Chưa có nhân viên nào."; return; }
-  if (!video.videoWidth) { $("result").textContent = "Chưa có camera."; return; }
-  busy = true; $("result").className = "result"; $("result").textContent = "Đang nhận diện...";
+// Called after each live frame. Checks in when the same employee is recognized in two frames in a row.
+async function onLive(r) {
+  const id = r.ok && r.match && r.match.employee_id;
+  const stable = id && id === lastSeen;
+  lastSeen = id || null;
+  if (!id) {
+    if (!hideTimer && r.bbox) kioskMessage(!r.ok ? (REASONS[r.reason] || r.reason) : r.match ? REASONS[r.match.reason] || "Chưa nhận ra" : "Chưa có nhân viên nào", true);
+    else if (!hideTimer) $("result").innerHTML = "";
+    return;
+  }
+  if (!stable || Date.now() < (nextTry.get(id) || 0)) return;
+  await autoCheckin(id);
+}
+
+async function autoCheckin(id) {
+  // Claim the person first, so another tab does not start a second attempt meanwhile.
+  nextTry.set(id, Date.now() + CHECKIN_TIMEOUT_MS + RETRY_MS);
+  busy = true; kioskMessage("Đang nhận diện...", true);
   const t0 = performance.now(), deadline = t0 + CHECKIN_TIMEOUT_MS;
   try {
-    let r;
+    let r, shot;
     while (true) {
       const final = performance.now() >= deadline;
-      r = await api("/api/checkin", { frame: snap(), mode: m, employee_id, final, thresholds: thresholds(), liveness_threshold: num("thLive") });
+      shot = snap();
+      // No employee_id: 1:N decides who it is, and a rejected attempt is logged as "-".
+      r = await api("/api/checkin", { frame: shot, mode: "auto", final, thresholds: thresholds(), liveness_threshold: num("thLive") });
       octx.clearRect(0, 0, W, H); drawBox(octx, r); showStatus(r);
       if (r.done) break;
     }
-    if (r.event) showEvent($("result"), r.event, `(${(performance.now() - t0).toFixed(0)} ms)`);
-    else { $("result").className = "result fail"; $("result").textContent = `❌ ${r.reason}`; }
-  } catch (e) { $("result").textContent = "Lỗi: " + e.message; }
-  busy = false; refresh();
-};
+    const ev = r.event, pass = ev && ev.result === "PASS";
+    nextTry.set(id, Date.now() + (pass ? COOLDOWN_MS : RETRY_MS));
+    if (pass && ev.employee_id !== id) nextTry.set(ev.employee_id, Date.now() + COOLDOWN_MS);
+    if (ev) {
+      const img = new Image(); img.src = shot; await img.decode();
+      const crop = cropFace(img, r.bbox);
+      details.set(evKey(ev), { crop, timings: r.timings });
+      kioskResult(ev, crop, (performance.now() - t0).toFixed(0));
+      selKey = evKey(ev);
+    } else kioskMessage(REASONS[r.reason] || r.reason);
+  } catch (e) { kioskMessage("Lỗi: " + e.message); }
+  busy = false; await refresh();
+  if (selKey) showDetail(logRows.find(e => evKey(e) === selKey));
+}
 
-$("recBtn").onclick = async () => {
+$("recBtn").onclick = guard(async () => {
   const f = $("recFile").files[0];
   if (!f) { $("recResult").textContent = "Chọn 1 ảnh."; return; }
   const m = mode(), employee_id = $("empSelect").value;
@@ -244,18 +479,18 @@ $("recBtn").onclick = async () => {
     if (!r.event) { $("recResult").className = "result fail"; $("recResult").textContent = `❌ ${r.reason}`; return; }
     showEvent($("recResult"), r.event);
     $("recTop").textContent = r.top.length ? "Top: " + r.top.map(([id, s]) => `${who(id)} ${s.toFixed(3)}`).join(" | ") : "";
-    const img = new Image();
-    img.onload = () => {
-      // The server works on a downscaled copy; scale its box back to this preview.
-      const c = $("preview"), s = Math.min(1, 480 / img.width);
-      c.width = img.width * s; c.height = img.height * s; c.style.display = "block";
-      const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, c.width, c.height);
-      drawBox(ctx, r, c.width / r.size[0]);
-    };
-    img.src = dataUrl;
+    const img = new Image(); img.src = dataUrl; await img.decode();
+    // The server works on a downscaled copy; scale its box back to this preview.
+    const c = $("preview"), s = Math.min(1, 480 / img.width);
+    c.width = img.width * s; c.height = img.height * s; c.style.display = "block";
+    const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, c.width, c.height);
+    drawBox(ctx, r, c.width / r.size[0]);
+    details.set(evKey(r.event), { crop: cropFace(img, r.bbox, img.width / r.size[0]), timings: r.timings, top: r.top });
+    selKey = evKey(r.event);
   } catch (e) { $("recResult").className = "result fail"; $("recResult").textContent = "Lỗi: " + e.message; }
-  refresh();
-};
+  await refresh();
+  if (selKey) showDetail(logRows.find(e => evKey(e) === selKey));
+});
 
 $("empList").onclick = async ev => {
   const { del, rename } = ev.target.dataset;
@@ -269,6 +504,40 @@ $("empList").onclick = async ev => {
   refresh();
 };
 
+$("log").onclick = ev => {
+  const tr = ev.target.closest("tr");
+  if (tr && tr.dataset.i !== undefined) showDetail(logRows[+tr.dataset.i]);
+};
+
+// Kiosk/Admin tabs. The single camera element moves to the view that is visible.
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+  const admin = b.dataset.view === "admin";
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t === b));
+  $("kioskView").hidden = admin; $("adminView").hidden = !admin;
+  $(admin ? "camSlotAdmin" : "camSlotKiosk").append($("cam"));
+});
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".seg button").forEach(t => { t.classList.toggle("on", t === b); $(t.dataset.pane).hidden = t !== b; });
+});
+document.querySelectorAll("input[type=range][data-for]").forEach(r => {
+  const box = $(r.dataset.for);
+  r.oninput = () => { box.value = r.value; renderLog(); };
+  box.addEventListener("input", () => { r.value = box.value; renderLog(); });
+});
+const syncRanges = () => document.querySelectorAll("input[type=range][data-for]").forEach(r => { r.value = $(r.dataset.for).value; });
+
+// Fullscreen kiosk. The same button (or Esc) leaves fullscreen.
+$("fsBtn").onclick = () => {
+  if (document.fullscreenElement) { document.exitFullscreen(); return; }
+  document.documentElement.requestFullscreen().catch(e => { $("status").textContent = "Không bật được toàn màn hình: " + e.message; });
+};
+document.addEventListener("fullscreenchange", () => {
+  const on = !!document.fullscreenElement;
+  document.body.classList.toggle("fs", on);
+  $("fsBtn").textContent = on ? "Thoát" : "Toàn màn hình";
+});
+const tick = () => { $("clock").textContent = new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }); };
+
 async function refresh(first) {
   const s = await api("/api/state");
   names = Object.fromEntries(s.employees.map(e => [e.id, e.name]));
@@ -277,19 +546,47 @@ async function refresh(first) {
     $("thStrict").value = s.defaults.t_strict; $("thMargin").value = s.defaults.margin;
     $("upCond").innerHTML = s.conditions.map(c => `<option>${c}</option>`).join("");
     $("dataDir").textContent = s.data_dir;
+    syncRanges();
   }
   const cur = $("empSelect").value, enrolled = s.employees.filter(e => e.enrolled);
   $("empSelect").innerHTML = enrolled.map(e => `<option value="${esc(e.id)}"${e.id === cur ? " selected" : ""}>${esc(who(e.id))}</option>`).join("");
+  $("empCount").textContent = `${s.employees.length} người`;
   $("empList").innerHTML = s.employees.length ? s.employees.map(e => `<tr>
-      <td>${esc(e.id)}${e.enrolled ? "" : ' <span class="fail">(chưa có template)</span>'}</td>
+      <td class="num">${esc(e.id)}</td>
       <td>${esc(e.name || "-")}</td>
-      <td title="${esc(e.rejected.length ? "Ảnh không dùng được: " + e.rejected.join(", ") : "")}">${e.photos || "webcam"}${e.rejected.length ? ` (${e.rejected.length} lỗi)` : ""}</td>
-      <td><button data-rename="${esc(e.id)}">Đổi tên</button> <button data-del="${esc(e.id)}">Xoá</button></td></tr>`).join("")
-    : '<tr><td colspan="4">(trống)</td></tr>';
-  $("log").innerHTML = s.log.map(e => `<tr><td>${e.timestamp.slice(11)}</td><td>${esc(e.mode)}</td><td>${esc(who(e.employee_id))}</td><td class="${e.result === "PASS" ? "pass" : "fail"}">${e.result}</td><td>${fmt(e.similarity)}</td><td>${fmt(e.liveness_score)}</td><td>${esc(e.reject_reason || "")}</td></tr>`).join("");
+      <td title="${esc(e.rejected.length ? "Ảnh không dùng được: " + e.rejected.join(", ") : "")}">${!e.enrolled ? '<span class="pill bad">chưa có template</span>'
+        : e.rejected.length ? `<span class="pill warn">${e.photos} ảnh · ${e.rejected.length} lỗi</span>` : `<span class="mono">${e.photos ? e.photos + " ảnh" : "webcam"}</span>`}</td>
+      <td class="row" style="gap:12px"><button class="link" data-rename="${esc(e.id)}">Đổi tên</button><button class="link" data-del="${esc(e.id)}">Xoá</button></td></tr>`).join("")
+    : '<tr><td colspan="4" class="empty">Chưa có nhân viên. Thêm ở thẻ "Thêm nhân viên".</td></tr>';
+  logRows = s.log;
+  renderLog();
 }
+function simCell(e) {
+  if (e.similarity === null || e.similarity === undefined) return '<td class="num">-</td>';
+  const th = thresholds(), line = e.mode.startsWith("pick") ? th.verify : th.t_strict, pct = v => Math.max(0, Math.min(1, v)) * 100;
+  return `<td><div class="simcell"><span class="bar"><i style="width:${pct(e.similarity)}%;background:var(--${e.result === "PASS" ? "ok" : "mute"})"></i>
+    <u style="left:${pct(line)}%"></u></span><span class="num">${fmt(e.similarity)}</span></div></td>`;
+}
+function renderLog() {
+  const counts = { all: logRows.length, PASS: logRows.filter(e => e.result === "PASS").length, FAIL: logRows.filter(e => e.result === "FAIL").length };
+  document.querySelectorAll("#logFilter button").forEach(b => {
+    b.classList.toggle("on", b.dataset.f === logFilter);
+    b.textContent = `${b.dataset.f === "all" ? "Tất cả" : b.dataset.f} ${counts[b.dataset.f]}`;
+  });
+  const rows = logRows.map((e, i) => [e, i]).filter(([e]) => logFilter === "all" || e.result === logFilter);
+  $("log").innerHTML = rows.length ? rows.map(([e, i]) => `<tr data-i="${i}" data-key="${esc(evKey(e))}"${evKey(e) === selKey ? ' class="sel"' : ""}>
+      <td class="num">${e.timestamp.slice(11)}</td><td class="num mute">${modeLabel(e.mode)}</td><td>${esc(who(e.employee_id))}</td>
+      <td><span class="pill ${tone(e)}">${e.result}</span></td>${simCell(e)}<td class="num">${fmt(e.liveness_score)}</td>
+      <td class="num mute">${esc(e.reject_reason || "")}</td></tr>`).join("")
+    : `<tr><td colspan="7" class="empty">${logRows.length ? "Không có sự kiện khớp bộ lọc." : "Chưa có sự kiện. Check-in ở màn Kiosk để tạo sự kiện đầu tiên."}</td></tr>`;
+}
+$("logFilter").onclick = ev => {
+  if (!ev.target.dataset.f) return;
+  logFilter = ev.target.dataset.f; renderLog();
+};
 
 (async () => {
+  tick(); setInterval(tick, 10000);
   await refresh(true);
   try {
     video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
