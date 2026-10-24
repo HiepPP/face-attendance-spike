@@ -67,6 +67,16 @@ def test_recognize_upload_identifies_and_blocks_spoof(svc, real):
     assert not (svc.store.root / "NV001" / "normal_2.jpg").exists()  # recognition never saves
 
 
+def test_rejected_photo_is_logged_without_a_name_in_1n_mode(svc, real):
+    # The Admin page sends no employee_id in 1:N mode; 1:1 mode still names the chosen employee.
+    svc.upload({"employee_id": "NV001", "file": b64(real)})
+    spoof = b64(cv2.imread(str(SAMPLES / "image_F2.jpg")))
+    r = svc.recognize({"mode": "auto", "file": spoof, "check_liveness": True})
+    assert r["event"]["reject_reason"] == "spoof" and r["event"]["employee_id"] == "-"
+    r = svc.recognize({"mode": "pick", "employee_id": "NV001", "file": spoof, "check_liveness": True})
+    assert r["event"]["reject_reason"] == "spoof" and r["event"]["employee_id"] == "NV001"
+
+
 def test_gallery_is_rebuilt_from_folder_after_restart(svc, real, tmp_path):
     svc.upload({"employee_id": "NV001", "name": "A", "file": b64(real)})
     app.GALLERY_PATH.unlink()

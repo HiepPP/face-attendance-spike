@@ -469,7 +469,8 @@ async function autoCheckin(id) {
 $("recBtn").onclick = guard(async () => {
   const f = $("recFile").files[0];
   if (!f) { $("recResult").textContent = "Chọn 1 ảnh."; return; }
-  const m = mode(), employee_id = $("empSelect").value;
+  // 1:N sends no employee_id, so a rejected photo is logged as "-" and not as the name in the list.
+  const m = mode(), employee_id = m === "pick" ? $("empSelect").value : undefined;
   if (m === "pick" && !employee_id) { $("recResult").textContent = "Chưa có nhân viên nào."; return; }
   $("recResult").className = "result"; $("recResult").textContent = "Đang nhận diện..."; $("recTop").textContent = "";
   try {
