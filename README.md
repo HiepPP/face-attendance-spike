@@ -30,7 +30,7 @@ Demo: no screenshot or GIF on purpose. Every useful capture of this app shows a 
 - Stack 1 pipeline: YuNet detection, MiniFASNet passive liveness, SFace 128-d embedding, cosine match.
 - 1:1 verify (pick a name) and 1:N identify ("just look at the camera") with a top-1 margin rule.
 - Quality gate that rejects blurry, dark, and overexposed faces, with a logged reason.
-- Local web demo: webcam enroll, upload enroll, live name label, check-in, and an event log.
+- Local web demo: a kiosk that checks in automatically, and an admin page for enroll, thresholds, photo recognition, and the event log.
 - Upload enroll saves photos in the benchmark layout `data/<set>/<person_id>/<condition>_<n>.jpg`.
 - Reproducible models: pinned commits and sha256 in `models/models.lock.json`.
 - Runs offline. The only network step is the one-time model download.
@@ -100,11 +100,24 @@ Open http://127.0.0.1:8765 and allow camera access.
 
 ## Web Demo
 
+The page has two tabs. It uses system fonts only, so it works offline.
+
+Kiosk:
+
+- The camera fills the screen. A ring in the center shows where to put the face. The sharp area is the 3:4 frame that the server checks.
+- Check-in is automatic and 1:N only. When the same employee is recognized in two frames in a row, the kiosk sends a check-in.
+- One employee is checked in once per 60 s. A failed attempt blocks the same employee for 5 s. The browser stores these times in `localStorage`, so a reload or a second tab does not log a duplicate. Two different browsers or devices do not share them.
+- An unknown face, a spoof, or a bad photo shows a hint on screen and is not logged.
+- The ring color shows the state: green means recognized, yellow means unknown or ambiguous, red means rejected.
+
+Admin:
+
 - Enroll with the webcam: 5 frames, at least 3 must pass. Only the averaged embedding is kept.
 - Enroll by upload: JPEG, PNG, or WebP (no HEIC). Pick a condition such as `normal` or `mask`. The template uses the `normal` photos when there are any.
-- Live label: each preview frame runs 1:N. Green means recognized, orange means unknown or ambiguous, red means rejected.
-- Check-in: webcam (retries for up to 2 s) or an uploaded photo (shows the top-5 matches).
-- Thresholds are editable on the page. Defaults: liveness 0.5, 1:1 cosine 0.363, 1:N T_strict 0.45, margin 0.05. They are not tuned yet.
+- Thresholds have a slider and a number field. Defaults: liveness 0.5, 1:1 cosine 0.363, 1:N T_strict 0.45, margin 0.05. They are not tuned yet.
+- Recognize an uploaded photo in 1:N or 1:1 mode. The page shows the top-5 matches. The photo is not saved.
+- The log shows the last 50 events, with a PASS/FAIL filter and a similarity bar against the current threshold.
+- Click a log row to see the event detail: face crop and step timings. Photo recognition events also show the top-3 candidates. The detail exists only for events from the current browser session, in memory.
 
 <p align="right">(<a href="#face-attendance-spike">back to top</a>)</p>
 
