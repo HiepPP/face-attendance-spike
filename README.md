@@ -106,7 +106,7 @@ Kiosk:
 
 - The camera fills the screen. A ring in the center shows where to put the face. The sharp area is the 3:4 frame that the server checks.
 - Check-in is automatic and 1:N only. When the same employee is recognized in two frames in a row, the kiosk sends a check-in.
-- One employee is checked in once per 60 s. A failed attempt blocks the same employee for 5 s. The browser stores these times in `localStorage`, so a reload or a second tab does not log a duplicate. Two different browsers or devices do not share them.
+- One employee is checked in once per 60 s. The server enforces this for all kiosks that use it: a second check-in within 60 s is not logged, and the kiosk shows when to try again. The browser also keeps these times in `localStorage`, so it does not send the request again after a reload. A failed attempt blocks the same employee for 5 s.
 - An unknown face, a spoof, or a bad photo shows a hint on screen and is not logged.
 - The ring color shows the state: green means recognized, yellow means unknown or ambiguous, red means rejected.
 

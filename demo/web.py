@@ -35,6 +35,8 @@ MAX_BODY = 40 * 1024 * 1024
 # Uploaded photos are downscaled for detection only; YuNet is trained on faces of about 10-300 px.
 # Scale by the short side, like the 480x640 webcam frames, so tall phone screenshots keep enough face pixels.
 UPLOAD_SHORT_SIDE = 480
+# One webcam check-in per employee per CHECKIN_COOLDOWN_S, across all kiosks that use this server.
+CHECKIN_COOLDOWN_S = 60
 
 
 def fit(img: np.ndarray, short_side: int = UPLOAD_SHORT_SIDE) -> np.ndarray:
@@ -60,6 +62,7 @@ class Service:
         self.lock = threading.RLock()  # OpenCV/ORT objects are shared; serialize pipeline calls
         self.photo_emb: dict[Path, np.ndarray | None] = {}
         self.rejected: dict[str, list[str]] = {}
+        self.last_pass: dict[str, float] = {}  # employee_id -> time.monotonic() of the last webcam check-in PASS
         with self.lock:
             for emp in self.store.people():
                 self._rebuild(emp)
@@ -159,15 +162,36 @@ class Service:
             self._rebuild(emp)
         return {"ok": True, "employee_id": emp, "saved": path.name, "photos": len(self.store.photos(emp))}
 
+    def _would_pass(self, r, mode: str, emp: str | None, th: dict) -> str | None:
+        """The employee a check-in would accept, without logging anything."""
+        if not r.ok:
+            return None
+        if mode == "pick":
+            return emp if self.gallery.verify(emp, r.embedding, th.get("verify", COSINE_THRESHOLD))[0] else None
+        return self.gallery.identify(r.embedding, th.get("t_strict", app.T_STRICT), th.get("margin", app.MARGIN))[0]
+
     def checkin(self, body: dict) -> dict:
-        """Webcam check-in: one attempt. The client retries until ok or 2 s, then sends final=true."""
+        """Webcam check-in: one attempt. The client retries until ok or 2 s, then sends final=true.
+
+        An employee who passed less than CHECKIN_COOLDOWN_S ago gets reason "already_checked_in" and
+        retry_after (seconds); that attempt is not logged.
+        """
         r = self._embed(to_portrait_3x4(decode(body["frame"])), body.get("liveness_threshold"))
         if not r.ok and not body.get("final"):
             return {"done": False, **self.describe(r)}
         mode, emp = body["mode"], body.get("employee_id")
         if mode == "pick" and emp not in self.gallery.people:
             return {"done": True, "event": None, "reason": "unknown_employee"}
-        ev = self._match(r, mode, emp, body.get("thresholds", {}), mode)
+        th = body.get("thresholds", {})
+        with self.lock:  # check and record in one step, so two kiosks cannot both pass
+            who = self._would_pass(r, mode, emp, th)
+            wait = CHECKIN_COOLDOWN_S - (time.monotonic() - self.last_pass[who]) if who in self.last_pass else 0
+            if wait > 0:
+                return {"done": True, **self.describe(r), "event": None, "reason": "already_checked_in",
+                        "employee_id": who, "retry_after": round(wait, 1)}
+            ev = self._match(r, mode, emp, th, mode)
+            if ev.result == "PASS":
+                self.last_pass[ev.employee_id] = time.monotonic()
         return {"done": True, "event": asdict(ev), **self.describe(r)}
 
     def recognize(self, body: dict) -> dict:
